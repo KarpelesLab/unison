@@ -43,7 +43,6 @@ func (g *Group[K, T]) Do(key K, fn func() (T, error)) (T, error) {
 	g.mu.Unlock()
 
 	c.val, c.err = fn()
-	c.done = true
 
 	g.mu.Lock()
 	delete(g.m, key)
@@ -85,8 +84,11 @@ func (g *Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (T
 	g.mu.Unlock()
 
 	c.val, c.err = fn()
+
+	g.mu.Lock()
 	c.exp = time.Now().Add(dur)
 	c.done = true
+	g.mu.Unlock()
 
 	c.wg.Done()
 
