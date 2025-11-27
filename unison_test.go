@@ -294,3 +294,98 @@ func TestForgetDoUntil(t *testing.T) {
 		t.Errorf("values = %d, %d, %d; want 1, 1, 2", v1, v2, v3)
 	}
 }
+
+func TestDoPanic(t *testing.T) {
+	var g Group[string, string]
+	_, err := g.Do("key", func() (string, error) {
+		panic("test panic")
+	})
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	panicErr, ok := err.(*PanicError)
+	if !ok {
+		t.Fatalf("expected *PanicError, got %T", err)
+	}
+	if panicErr.Value != "test panic" {
+		t.Errorf("panic value = %v; want 'test panic'", panicErr.Value)
+	}
+}
+
+func TestDoPanicDupSuppress(t *testing.T) {
+	var g Group[string, string]
+	var calls atomic.Int32
+	var wg sync.WaitGroup
+
+	fn := func() (string, error) {
+		calls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		panic("test panic")
+	}
+
+	const n = 10
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := g.Do("key", fn)
+			if err == nil {
+				t.Error("expected error from panic")
+				return
+			}
+			if _, ok := err.(*PanicError); !ok {
+				t.Errorf("expected *PanicError, got %T", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("number of calls = %d; want 1", got)
+	}
+}
+
+func TestDoUntilPanic(t *testing.T) {
+	var g Group[string, string]
+	_, err := g.DoUntil("key", time.Second, func() (string, error) {
+		panic("test panic")
+	})
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	panicErr, ok := err.(*PanicError)
+	if !ok {
+		t.Fatalf("expected *PanicError, got %T", err)
+	}
+	if panicErr.Value != "test panic" {
+		t.Errorf("panic value = %v; want 'test panic'", panicErr.Value)
+	}
+}
+
+func TestDoUntilPanicCached(t *testing.T) {
+	var g Group[string, string]
+	var calls atomic.Int32
+
+	fn := func() (string, error) {
+		calls.Add(1)
+		panic("test panic")
+	}
+
+	// First call panics
+	_, err1 := g.DoUntil("key", 100*time.Millisecond, fn)
+	// Second call should return cached panic error
+	_, err2 := g.DoUntil("key", 100*time.Millisecond, fn)
+
+	if err1 == nil || err2 == nil {
+		t.Fatal("expected errors from panic")
+	}
+	if _, ok := err1.(*PanicError); !ok {
+		t.Errorf("expected *PanicError for err1, got %T", err1)
+	}
+	if _, ok := err2.(*PanicError); !ok {
+		t.Errorf("expected *PanicError for err2, got %T", err2)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("number of calls = %d; want 1 (panic should be cached)", got)
+	}
+}

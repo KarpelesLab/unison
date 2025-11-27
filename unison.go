@@ -1,9 +1,19 @@
 package unison
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
+
+// PanicError wraps a panic value as an error.
+type PanicError struct {
+	Value any
+}
+
+func (e *PanicError) Error() string {
+	return fmt.Sprintf("panic: %v", e.Value)
+}
 
 // call represents an in-flight or completed function call.
 type call[T any] struct {
@@ -34,7 +44,7 @@ func (g *Group[K, T]) Forget(key K) {
 // sure that only one execution is in-flight for a given key at a time.
 // If a duplicate comes in, the duplicate caller waits for the original
 // to complete and receives the same results.
-func (g *Group[K, T]) Do(key K, fn func() (T, error)) (T, error) {
+func (g *Group[K, T]) Do(key K, fn func() (T, error)) (val T, err error) {
 	g.mu.Lock()
 	if g.m == nil {
 		g.m = make(map[K]*call[T])
@@ -51,13 +61,18 @@ func (g *Group[K, T]) Do(key K, fn func() (T, error)) (T, error) {
 	g.m[key] = c
 	g.mu.Unlock()
 
+	defer func() {
+		if r := recover(); r != nil {
+			c.err = &PanicError{Value: r}
+		}
+		g.mu.Lock()
+		delete(g.m, key)
+		g.mu.Unlock()
+		c.wg.Done()
+		val, err = c.val, c.err
+	}()
+
 	c.val, c.err = fn()
-
-	g.mu.Lock()
-	delete(g.m, key)
-	g.mu.Unlock()
-
-	c.wg.Done()
 
 	return c.val, c.err
 }
@@ -65,7 +80,7 @@ func (g *Group[K, T]) Do(key K, fn func() (T, error)) (T, error) {
 // DoUntil is like Do but caches the result for the specified duration.
 // Subsequent calls within the cache window return the cached result without
 // executing the function again.
-func (g *Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (T, error) {
+func (g *Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (val T, err error) {
 	g.mu.Lock()
 	if g.m == nil {
 		g.m = make(map[K]*call[T])
@@ -92,14 +107,19 @@ func (g *Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (T
 	g.m[key] = c
 	g.mu.Unlock()
 
+	defer func() {
+		if r := recover(); r != nil {
+			c.err = &PanicError{Value: r}
+		}
+		g.mu.Lock()
+		c.exp = time.Now().Add(dur)
+		c.done = true
+		g.mu.Unlock()
+		c.wg.Done()
+		val, err = c.val, c.err
+	}()
+
 	c.val, c.err = fn()
-
-	g.mu.Lock()
-	c.exp = time.Now().Add(dur)
-	c.done = true
-	g.mu.Unlock()
-
-	c.wg.Done()
 
 	return c.val, c.err
 }
