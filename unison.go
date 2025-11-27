@@ -16,19 +16,19 @@ type call[T any] struct {
 
 // Group represents a class of work and forms a namespace in which
 // units of work can be executed with duplicate suppression.
-type Group[T any] struct {
+type Group[K comparable, T any] struct {
 	mu sync.Mutex
-	m  map[string]*call[T]
+	m  map[K]*call[T]
 }
 
 // Do executes and returns the results of the given function, making
 // sure that only one execution is in-flight for a given key at a time.
 // If a duplicate comes in, the duplicate caller waits for the original
 // to complete and receives the same results.
-func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
+func (g *Group[K, T]) Do(key K, fn func() (T, error)) (T, error) {
 	g.mu.Lock()
 	if g.m == nil {
-		g.m = make(map[string]*call[T])
+		g.m = make(map[K]*call[T])
 	}
 
 	if c, ok := g.m[key]; ok {
@@ -57,10 +57,10 @@ func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
 // DoUntil is like Do but caches the result for the specified duration.
 // Subsequent calls within the cache window return the cached result without
 // executing the function again.
-func (g *Group[T]) DoUntil(key string, dur time.Duration, fn func() (T, error)) (T, error) {
+func (g *Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (T, error) {
 	g.mu.Lock()
 	if g.m == nil {
-		g.m = make(map[string]*call[T])
+		g.m = make(map[K]*call[T])
 	}
 
 	if c, ok := g.m[key]; ok {

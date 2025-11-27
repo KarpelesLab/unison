@@ -20,7 +20,7 @@ import (
     "github.com/KarpelesLab/unison"
 )
 
-var group unison.Group[string]
+var group unison.Group[string, string]
 
 func main() {
     result, err := group.Do("my-key", func() (string, error) {
@@ -44,7 +44,7 @@ func main() {
 ## Example: Caching Expensive Operations
 
 ```go
-var userLoader unison.Group[*User]
+var userLoader unison.Group[string, *User]
 
 func GetUser(id string) (*User, error) {
     return userLoader.Do(id, func() (*User, error) {
@@ -58,7 +58,7 @@ func GetUser(id string) (*User, error) {
 ## Example: Preventing Thundering Herd
 
 ```go
-var cacheRefresh unison.Group[[]Product]
+var cacheRefresh unison.Group[string, []Product]
 
 func GetProducts() ([]Product, error) {
     return cacheRefresh.Do("products", func() ([]Product, error) {
@@ -72,7 +72,7 @@ func GetProducts() ([]Product, error) {
 ## Example: Time-Based Caching with DoUntil
 
 ```go
-var configLoader unison.Group[*Config]
+var configLoader unison.Group[string, *Config]
 
 func GetConfig() (*Config, error) {
     return configLoader.DoUntil("config", 5*time.Minute, func() (*Config, error) {
@@ -85,19 +85,20 @@ func GetConfig() (*Config, error) {
 
 ## API
 
-### `Group[T any]`
+### `Group[K comparable, T any]`
 
-A generic type that manages in-flight function calls. Zero-value is ready to use.
+A generic type that manages in-flight function calls. `K` is the key type (must be comparable), `T` is the result type. Zero-value is ready to use.
 
 ```go
-var g unison.Group[string]
+var g unison.Group[string, string]    // string keys, string values
+var g unison.Group[int, *User]        // int keys, *User values
 ```
 
-### `(*Group[T]) Do(key string, fn func() (T, error)) (T, error)`
+### `(*Group[K, T]) Do(key K, fn func() (T, error)) (T, error)`
 
 Executes `fn` for the given `key`, ensuring only one execution is in-flight at a time per key. Concurrent callers with the same key wait for the first caller's result. Once complete, subsequent calls trigger a new execution.
 
-### `(*Group[T]) DoUntil(key string, dur time.Duration, fn func() (T, error)) (T, error)`
+### `(*Group[K, T]) DoUntil(key K, dur time.Duration, fn func() (T, error)) (T, error)`
 
 Like `Do`, but caches the result for the specified duration. Subsequent calls within the cache window return the cached result without executing `fn` again. After expiration, the next call triggers a new execution.
 

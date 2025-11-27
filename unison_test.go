@@ -9,7 +9,7 @@ import (
 )
 
 func TestDo(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	v, err := g.Do("key", func() (string, error) {
 		return "bar", nil
 	})
@@ -22,7 +22,7 @@ func TestDo(t *testing.T) {
 }
 
 func TestDoErr(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	someErr := errors.New("some error")
 	v, err := g.Do("key", func() (string, error) {
 		return "", someErr
@@ -36,7 +36,7 @@ func TestDoErr(t *testing.T) {
 }
 
 func TestDoDupSuppress(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	var calls atomic.Int32
 	var wg sync.WaitGroup
 
@@ -68,7 +68,7 @@ func TestDoDupSuppress(t *testing.T) {
 }
 
 func TestDoNewCallAfterComplete(t *testing.T) {
-	var g Group[int]
+	var g Group[string, int]
 	var calls atomic.Int32
 
 	fn := func() (int, error) {
@@ -90,7 +90,7 @@ func TestDoNewCallAfterComplete(t *testing.T) {
 }
 
 func TestDoDifferentKeys(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	var calls atomic.Int32
 	var wg sync.WaitGroup
 
@@ -125,7 +125,7 @@ func TestDoDifferentKeys(t *testing.T) {
 }
 
 func TestDoUntil(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	v, err := g.DoUntil("key", time.Second, func() (string, error) {
 		return "bar", nil
 	})
@@ -138,7 +138,7 @@ func TestDoUntil(t *testing.T) {
 }
 
 func TestDoUntilCached(t *testing.T) {
-	var g Group[int]
+	var g Group[string, int]
 	var calls atomic.Int32
 
 	fn := func() (int, error) {
@@ -158,7 +158,7 @@ func TestDoUntilCached(t *testing.T) {
 }
 
 func TestDoUntilExpired(t *testing.T) {
-	var g Group[int]
+	var g Group[string, int]
 	var calls atomic.Int32
 
 	fn := func() (int, error) {
@@ -181,7 +181,7 @@ func TestDoUntilExpired(t *testing.T) {
 }
 
 func TestDoUntilDupSuppress(t *testing.T) {
-	var g Group[string]
+	var g Group[string, string]
 	var calls atomic.Int32
 	var wg sync.WaitGroup
 
@@ -209,5 +209,25 @@ func TestDoUntilDupSuppress(t *testing.T) {
 
 	if got := calls.Load(); got != 1 {
 		t.Errorf("number of calls = %d; want 1", got)
+	}
+}
+
+func TestDoIntKey(t *testing.T) {
+	var g Group[int, string]
+	var calls atomic.Int32
+
+	fn := func() (string, error) {
+		calls.Add(1)
+		return "value", nil
+	}
+
+	v1, _ := g.Do(123, fn)
+	v2, _ := g.Do(456, fn)
+
+	if v1 != "value" || v2 != "value" {
+		t.Errorf("values = %v, %v; want value, value", v1, v2)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("number of calls = %d; want 2", got)
 	}
 }
