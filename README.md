@@ -102,6 +102,10 @@ Executes `fn` for the given `key`, ensuring only one execution is in-flight at a
 
 Like `Do`, but caches the result for the specified duration. Subsequent calls within the cache window return the cached result without executing `fn` again. After expiration, the next call triggers a new execution.
 
+### `(*Group[K, T]) Forget(key K)`
+
+Removes a key from the group, causing future calls to execute the function again even if a previous call is still in-flight. Goroutines already waiting for the result will still receive it. Also useful for invalidating cached results from `DoUntil`.
+
 ## License
 
 See [LICENSE](LICENSE) file.

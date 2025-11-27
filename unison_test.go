@@ -231,3 +231,66 @@ func TestDoIntKey(t *testing.T) {
 		t.Errorf("number of calls = %d; want 2", got)
 	}
 }
+
+func TestForget(t *testing.T) {
+	var g Group[string, int]
+	var calls atomic.Int32
+	var wg sync.WaitGroup
+
+	fn := func() (int, error) {
+		calls.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		return int(calls.Load()), nil
+	}
+
+	// Start first call
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		g.Do("key", fn)
+	}()
+
+	// Wait a bit for first call to start
+	time.Sleep(20 * time.Millisecond)
+
+	// Forget the key while first call is in-flight
+	g.Forget("key")
+
+	// Start second call - should execute since key was forgotten
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		g.Do("key", fn)
+	}()
+
+	wg.Wait()
+
+	if got := calls.Load(); got != 2 {
+		t.Errorf("number of calls = %d; want 2", got)
+	}
+}
+
+func TestForgetDoUntil(t *testing.T) {
+	var g Group[string, int]
+	var calls atomic.Int32
+
+	fn := func() (int, error) {
+		return int(calls.Add(1)), nil
+	}
+
+	// First call caches the result
+	v1, _ := g.DoUntil("key", time.Minute, fn)
+
+	// Second call returns cached result
+	v2, _ := g.DoUntil("key", time.Minute, fn)
+
+	// Forget invalidates the cache
+	g.Forget("key")
+
+	// Third call executes again
+	v3, _ := g.DoUntil("key", time.Minute, fn)
+
+	if v1 != 1 || v2 != 1 || v3 != 2 {
+		t.Errorf("values = %d, %d, %d; want 1, 1, 2", v1, v2, v3)
+	}
+}

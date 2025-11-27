@@ -21,6 +21,15 @@ type Group[K comparable, T any] struct {
 	m  map[K]*call[T]
 }
 
+// Forget removes a key from the group, causing future calls to execute
+// the function again even if a previous call is still in-flight.
+// Goroutines already waiting for the result will still receive it.
+func (g *Group[K, T]) Forget(key K) {
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+}
+
 // Do executes and returns the results of the given function, making
 // sure that only one execution is in-flight for a given key at a time.
 // If a duplicate comes in, the duplicate caller waits for the original
