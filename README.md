@@ -1,5 +1,7 @@
 # unison
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/KarpelesLab/unison.svg)](https://pkg.go.dev/github.com/KarpelesLab/unison)
+
 A Go library for coalescing duplicate function calls. When multiple goroutines request the same key simultaneously, only one executes the function while others wait and receive the same result.
 
 ## Installation
