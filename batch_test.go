@@ -225,6 +225,91 @@ func TestBatchDoStringType(t *testing.T) {
 	}
 }
 
+func TestBatchDoMaxSize(t *testing.T) {
+	var batchSizes []int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Use channels to control execution timing
+	batch1Started := make(chan struct{})
+	batch1Proceed := make(chan struct{})
+	batch2Started := make(chan struct{})
+	batch2Proceed := make(chan struct{})
+	batchCount := atomic.Int32{}
+
+	b := NewBatch(func(values []int) error {
+		n := batchCount.Add(1)
+		mu.Lock()
+		batchSizes = append(batchSizes, len(values))
+		mu.Unlock()
+
+		switch n {
+		case 1:
+			close(batch1Started)
+			<-batch1Proceed
+		case 2:
+			close(batch2Started)
+			<-batch2Proceed
+		}
+		return nil
+	})
+	b.MaxSize = 2 // Limit pending batch to 2 values
+
+	// First batch: single value (runs immediately)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		b.Do(1)
+	}()
+
+	<-batch1Started // Wait for first batch to start
+
+	// Add 2 values to pending (should fill it)
+	for i := 2; i <= 3; i++ {
+		wg.Add(1)
+		go func(v int) {
+			defer wg.Done()
+			b.Do(v)
+		}(i)
+	}
+
+	time.Sleep(20 * time.Millisecond) // Let goroutines queue up
+
+	// Add 2 more values - these should block until pending clears
+	for i := 4; i <= 5; i++ {
+		wg.Add(1)
+		go func(v int) {
+			defer wg.Done()
+			b.Do(v)
+		}(i)
+	}
+
+	time.Sleep(20 * time.Millisecond) // Let goroutines attempt to queue
+	close(batch1Proceed)              // Let first batch complete
+
+	<-batch2Started                   // Wait for second batch to start
+	time.Sleep(20 * time.Millisecond) // Let blocked goroutines queue into new pending
+	close(batch2Proceed)              // Let second batch complete
+
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(batchSizes) != 3 {
+		t.Fatalf("number of batches = %d; want 3", len(batchSizes))
+	}
+	if batchSizes[0] != 1 {
+		t.Errorf("first batch size = %d; want 1", batchSizes[0])
+	}
+	if batchSizes[1] != 2 {
+		t.Errorf("second batch size = %d; want 2 (MaxSize limit)", batchSizes[1])
+	}
+	if batchSizes[2] != 2 {
+		t.Errorf("third batch size = %d; want 2", batchSizes[2])
+	}
+}
+
 func TestBatchDoMultipleBatches(t *testing.T) {
 	var calls atomic.Int32
 	var batchSizes []int

@@ -146,7 +146,18 @@ Creates a new Batch with the given processing function. The function will be cal
 
 ### `(*Batch[T]) Do(value T) error`
 
-Adds a value to be processed and waits for the batch to complete. All callers in the same batch receive the same error result.
+Adds a value to be processed and waits for the batch to complete. All callers in the same batch receive the same error result. If `MaxSize` is set and the pending batch is full, the caller blocks until there is room.
+
+### `Batch[T].MaxSize`
+
+Maximum number of values in a pending batch. When set to a non-zero value, callers will block if the pending batch is full. Default is 0 (unlimited).
+
+```go
+b := unison.NewBatch(func(ids []int) error {
+    return db.BulkInsert(ids)
+})
+b.MaxSize = 100 // Limit batches to 100 values
+```
 
 ## License
 

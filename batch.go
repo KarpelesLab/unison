@@ -21,6 +21,7 @@ type Batch[T any] struct {
 	fn      func([]T) error
 	current *batchCall[T]
 	pending *batchCall[T]
+	MaxSize int // Maximum batch size, 0 means unlimited
 }
 
 // NewBatch creates a new Batch with the given processing function.
@@ -31,48 +32,61 @@ func NewBatch[T any](fn func([]T) error) *Batch[T] {
 
 // Do adds a value to be processed and waits for the batch to complete.
 // All callers in the same batch receive the same error result.
+// If MaxSize is set and the pending batch is full, the caller blocks until
+// there is room.
 func (b *Batch[T]) Do(value T) error {
 	b.mu.Lock()
 
-	if b.current != nil {
-		// Add to pending batch
-		p := b.pending
-		if p == nil {
-			p = &batchCall[T]{}
-			p.wg.Add(1)
-			b.pending = p
-		}
-		p.values = append(p.values, value)
-		c := b.current
-		b.mu.Unlock()
-
-		// Wait for current batch to finish
-		c.wg.Wait()
-
-		// Try to become the runner for the pending batch
-		b.mu.Lock()
-		if b.pending == p {
-			b.pending = nil
-			b.current = p
+	for {
+		if b.current == nil {
+			// No current execution, start one immediately
+			c := &batchCall[T]{values: []T{value}}
+			c.wg.Add(1)
+			b.current = c
 			b.mu.Unlock()
-			b.run(p)
+			b.run(c)
+			return c.err
+		}
+
+		// Current is running, check if we can add to pending
+		p := b.pending
+		canAdd := p == nil || b.MaxSize == 0 || len(p.values) < b.MaxSize
+
+		if canAdd {
+			if p == nil {
+				p = &batchCall[T]{}
+				p.wg.Add(1)
+				b.pending = p
+			}
+			p.values = append(p.values, value)
+			c := b.current
+			b.mu.Unlock()
+
+			// Wait for current batch to finish
+			c.wg.Wait()
+
+			// Try to become the runner for the pending batch
+			b.mu.Lock()
+			if b.pending == p {
+				b.pending = nil
+				b.current = p
+				b.mu.Unlock()
+				b.run(p)
+				return p.err
+			}
+			b.mu.Unlock()
+
+			// Someone else is running it, wait for completion
+			p.wg.Wait()
 			return p.err
 		}
+
+		// Pending is full, wait for current to finish and retry
+		c := b.current
 		b.mu.Unlock()
-
-		// Someone else is running it, wait for completion
-		p.wg.Wait()
-		return p.err
+		c.wg.Wait()
+		b.mu.Lock()
 	}
-
-	// No current execution, start one immediately
-	c := &batchCall[T]{values: []T{value}}
-	c.wg.Add(1)
-	b.current = c
-	b.mu.Unlock()
-
-	b.run(c)
-	return c.err
 }
 
 // run executes a batch.
