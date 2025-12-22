@@ -4,6 +4,8 @@
 
 A Go library for coalescing duplicate function calls. When multiple goroutines request the same key simultaneously, only one executes the function while others wait and receive the same result.
 
+Also provides batching capabilities to collect multiple values and process them together.
+
 ## Installation
 
 ```bash
@@ -105,6 +107,46 @@ Like `Do`, but caches the result for the specified duration. Subsequent calls wi
 ### `(*Group[K, T]) Forget(key K)`
 
 Removes a key from the group, causing future calls to execute the function again even if a previous call is still in-flight. Goroutines already waiting for the result will still receive it. Also useful for invalidating cached results from `DoUntil`.
+
+### `(*Group[K, T]) Len() int`
+
+Returns the number of entries currently in the group, including both in-flight calls and cached results.
+
+### `(*Group[K, T]) Has(key K) bool`
+
+Reports whether a key exists in the group with a valid (non-expired) entry. Returns true if the key has an in-flight call or a cached result that hasn't expired.
+
+### `(*Group[K, T]) Cleanup()`
+
+Removes all expired entries from the group. Useful for reclaiming memory when using `DoUntil` with many unique keys.
+
+---
+
+## Batch
+
+`Batch` collects multiple calls and processes them together. When the first call arrives, execution starts immediately. Any calls that arrive while execution is in progress are collected and processed together in the next batch.
+
+### Example: Batching Database Inserts
+
+```go
+var inserter = unison.NewBatch(func(users []User) error {
+    // All users collected during the batch window are inserted together
+    return db.BulkInsert(users)
+})
+
+func CreateUser(u User) error {
+    // Multiple goroutines calling this will have their users batched
+    return inserter.Do(u)
+}
+```
+
+### `NewBatch[T any](fn func([]T) error) *Batch[T]`
+
+Creates a new Batch with the given processing function. The function will be called with batches of values as they are collected.
+
+### `(*Batch[T]) Do(value T) error`
+
+Adds a value to be processed and waits for the batch to complete. All callers in the same batch receive the same error result.
 
 ## License
 
