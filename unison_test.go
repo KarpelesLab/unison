@@ -389,3 +389,148 @@ func TestDoUntilPanicCached(t *testing.T) {
 		t.Errorf("number of calls = %d; want 1 (panic should be cached)", got)
 	}
 }
+
+func TestPanicErrorStack(t *testing.T) {
+	var g Group[string, string]
+	_, err := g.Do("key", func() (string, error) {
+		panic("test panic")
+	})
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	panicErr, ok := err.(*PanicError)
+	if !ok {
+		t.Fatalf("expected *PanicError, got %T", err)
+	}
+	if len(panicErr.Stack) == 0 {
+		t.Error("expected stack trace in PanicError")
+	}
+	// Verify stack trace contains relevant info
+	stackStr := string(panicErr.Stack)
+	if len(stackStr) < 100 {
+		t.Error("stack trace seems too short")
+	}
+}
+
+func TestDoUntilPanicErrorStack(t *testing.T) {
+	var g Group[string, string]
+	_, err := g.DoUntil("key", time.Second, func() (string, error) {
+		panic("test panic")
+	})
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	panicErr, ok := err.(*PanicError)
+	if !ok {
+		t.Fatalf("expected *PanicError, got %T", err)
+	}
+	if len(panicErr.Stack) == 0 {
+		t.Error("expected stack trace in PanicError")
+	}
+}
+
+func TestLen(t *testing.T) {
+	var g Group[string, int]
+
+	if g.Len() != 0 {
+		t.Errorf("Len = %d; want 0", g.Len())
+	}
+
+	g.DoUntil("key1", time.Minute, func() (int, error) { return 1, nil })
+	g.DoUntil("key2", time.Minute, func() (int, error) { return 2, nil })
+
+	if g.Len() != 2 {
+		t.Errorf("Len = %d; want 2", g.Len())
+	}
+}
+
+func TestHas(t *testing.T) {
+	var g Group[string, int]
+
+	// Empty group
+	if g.Has("key") {
+		t.Error("Has returned true for non-existent key")
+	}
+
+	// Add a cached entry
+	g.DoUntil("key", 100*time.Millisecond, func() (int, error) {
+		return 42, nil
+	})
+
+	if !g.Has("key") {
+		t.Error("Has returned false for existing key")
+	}
+
+	// Wait for expiration
+	time.Sleep(110 * time.Millisecond)
+
+	if g.Has("key") {
+		t.Error("Has returned true for expired key")
+	}
+}
+
+func TestHasInFlight(t *testing.T) {
+	var g Group[string, int]
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+
+	go func() {
+		g.Do("key", func() (int, error) {
+			close(started)
+			<-proceed
+			return 42, nil
+		})
+	}()
+
+	<-started // Wait for goroutine to start
+
+	if !g.Has("key") {
+		t.Error("Has returned false for in-flight key")
+	}
+
+	close(proceed) // Let the goroutine finish
+}
+
+func TestCleanup(t *testing.T) {
+	var g Group[string, int]
+	var calls atomic.Int32
+
+	fn := func() (int, error) {
+		return int(calls.Add(1)), nil
+	}
+
+	// Create some cached entries
+	g.DoUntil("key1", 50*time.Millisecond, fn)
+	g.DoUntil("key2", 50*time.Millisecond, fn)
+	g.DoUntil("key3", 200*time.Millisecond, fn)
+
+	if g.Len() != 3 {
+		t.Errorf("Len = %d; want 3", g.Len())
+	}
+
+	// Wait for some to expire
+	time.Sleep(60 * time.Millisecond)
+
+	// Cleanup should remove expired entries
+	g.Cleanup()
+
+	if g.Len() != 1 {
+		t.Errorf("Len after Cleanup = %d; want 1", g.Len())
+	}
+
+	// key3 should still be there
+	if !g.Has("key3") {
+		t.Error("key3 should still exist after cleanup")
+	}
+}
+
+func TestCleanupEmpty(t *testing.T) {
+	var g Group[string, int]
+
+	// Should not panic on empty group
+	g.Cleanup()
+
+	if g.Len() != 0 {
+		t.Errorf("Len = %d; want 0", g.Len())
+	}
+}
