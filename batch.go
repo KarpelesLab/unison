@@ -33,13 +33,24 @@ func NewBatch[T any](fn func([]T) error) *Batch[T] {
 	return &Batch[T]{fn: fn}
 }
 
-// acquireSlice gets a slice from the pool or returns nil.
+// acquireSlice gets a slice from the pool or allocates one with capacity MaxSize+1.
 // Must be called with b.mu held.
 func (b *Batch[T]) acquireSlice() []T {
-	if b.spareSlice != nil {
+	// Calculate required capacity: MaxSize+1 to allow runner to add their value
+	requiredCap := b.MaxSize + 1
+	if b.MaxSize == 0 {
+		requiredCap = 0 // unlimited, let it grow naturally
+	}
+
+	if b.spareSlice != nil && (requiredCap == 0 || cap(b.spareSlice) >= requiredCap) {
 		s := b.spareSlice[:0]
 		b.spareSlice = nil
 		return s
+	}
+
+	// Allocate new slice with required capacity
+	if requiredCap > 0 {
+		return make([]T, 0, requiredCap)
 	}
 	return nil
 }
@@ -148,7 +159,8 @@ func (b *Batch[T]) Do(value T) error {
 		if b.pending != nil {
 			c := b.pending
 			// Try to add our value to this batch
-			if b.MaxSize == 0 || len(c.values) < b.MaxSize {
+			// Allow MaxSize+1 since we're doing the work of running the batch
+			if b.MaxSize == 0 || len(c.values) <= b.MaxSize {
 				c.values = append(c.values, value)
 				b.pending = b.overflow
 				b.overflow = nil
@@ -158,7 +170,7 @@ func (b *Batch[T]) Do(value T) error {
 				return c.err
 			}
 
-			// Batch is full, create new pending for our value
+			// Batch is full (even with +1 allowance), create new pending for our value
 			np := &batchCall[T]{values: b.acquireSlice()}
 			np.values = append(np.values, value)
 			np.wg.Add(1)
