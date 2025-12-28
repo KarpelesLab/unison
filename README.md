@@ -1,6 +1,8 @@
 # unison
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/KarpelesLab/unison.svg)](https://pkg.go.dev/github.com/KarpelesLab/unison)
+[![CI](https://github.com/KarpelesLab/unison/actions/workflows/ci.yml/badge.svg)](https://github.com/KarpelesLab/unison/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/KarpelesLab/unison/badge.svg?branch=master)](https://coveralls.io/github/KarpelesLab/unison?branch=master)
 
 A Go library for coalescing duplicate function calls. When multiple goroutines request the same key simultaneously, only one executes the function while others wait and receive the same result.
 
